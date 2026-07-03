@@ -1,0 +1,79 @@
+function handleExcelUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // 1. Initialize Default Row Indices
+        let rowIndices = {
+            vessel: 0, status: 1, activity: 2, loading_port: 3, loading_eta: 4,
+            ms_cargo: 5, hsd_cargo: 6, disport: 7, disport_eta: 8, remarks: 9, next_voyage: 10
+        };
+
+        // 2. Dynamic Header Finder
+        // This loops through the first 20 rows to find exactly where your labels are
+        for(let r = 0; r < Math.min(matrix.length, 20); r++) {
+            if(!matrix[r]) continue;
+            let rowText = matrix[r].join(" ").toUpperCase();
+            
+            if(rowText.includes("VESSEL")) rowIndices.vessel = r;
+            if(rowText.includes("STATUS")) rowIndices.status = r;
+            if(rowText.includes("ACTIVITY")) rowIndices.activity = r;
+            if(rowText.includes("LOADING PORT")) rowIndices.loading_port = r;
+            if(rowText.includes("LOADING ETA")) rowIndices.loading_eta = r;
+            if(rowText.includes("MS")) rowIndices.ms_cargo = r;
+            if(rowText.includes("HSD")) rowIndices.hsd_cargo = r;
+            if(rowText.includes("DISPORT")) rowIndices.disport = r;
+            if(rowText.includes("DISPORT ETA")) rowIndices.disport_eta = r;
+            if(rowText.includes("REMARKS")) rowIndices.remarks = r;
+            if(rowText.includes("NEXT VOYAGE")) rowIndices.next_voyage = r;
+        }
+
+        let parsedFleet = [];
+        let vesselRow = matrix[rowIndices.vessel];
+
+        // 3. Robust Data Extraction
+        if (vesselRow) {
+            // Assume data starts from column 2 (index 1) based on your layout
+            for (let colIdx = 1; colIdx < vesselRow.length; colIdx++) {
+                let name = vesselRow[colIdx];
+                if (name && name.toString().trim() !== "") {
+                    
+                    // Helper to get value safely
+                    const getValue = (idx) => (matrix[idx] ? (matrix[idx][colIdx] || "N/A") : "N/A");
+
+                    parsedFleet.push({
+                        "vessel": name.toString().trim(),
+                        "status": getValue(rowIndices.status),
+                        "activity": getValue(rowIndices.activity),
+                        "loading_port": getValue(rowIndices.loading_port),
+                        "loading_eta": getValue(rowIndices.loading_eta),
+                        "ms_cargo": safeCleanParseFloat(getValue(rowIndices.ms_cargo)),
+                        "hsd_cargo": safeCleanParseFloat(getValue(rowIndices.hsd_cargo)),
+                        "disport": getValue(rowIndices.disport),
+                        "disport_eta": getValue(rowIndices.disport_eta),
+                        "remarks": getValue(rowIndices.remarks),
+                        "next_voyage": getValue(rowIndices.next_voyage)
+                    });
+                }
+            }
+        }
+
+        if(parsedFleet.length > 0) {
+            currentFleetData = parsedFleet;
+            const now = new Date();
+            const formattedDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            document.getElementById('liveTimestampBadge').innerText = `Last Updated: ${formattedDate}`;
+            processAndRenderData();
+        } else {
+            alert("Error: Could not parse Excel structure. Please ensure the 'Vessel' header exists in the first 20 rows.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
