@@ -4,395 +4,131 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Fleet Tanker Command Console</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <!-- Leaflet Map Engine -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link class="main-map" rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- SheetJS Spreadsheet Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         #map { height: 520px; border-radius: 12px; z-index: 1; }
-        .vessel-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
-        .vessel-card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -3px rgba(0, 0, 0, 0.15); }
-        
-        /* Pulse Animations for Map & Cards based on Vessel Status */
-        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
-        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
-        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
-        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-        
-        .indicator-sailing { animation: radar-pulse-green 2s infinite; background-color: #10b981; }
-        .indicator-discharging { animation: radar-pulse-blue 2s infinite; background-color: #3b82f6; }
-        .indicator-loading { animation: radar-pulse-amber 2s infinite; background-color: #f59e0b; }
-        .indicator-berthed { animation: radar-pulse-red 2s infinite; background-color: #ef4444; }
-        
-        .vessel-map-label { background: rgba(255, 255, 255, 0.95); border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .modal-bg { background-color: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); }
+        .vessel-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
+        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
+        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
+        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .indicator-sailing { animation: radar-pulse-green 2s infinite; }
+        .indicator-discharging { animation: radar-pulse-blue 2s infinite; }
+        .indicator-loading { animation: radar-pulse-amber 2s infinite; }
+        .indicator-berthed { animation: radar-pulse-red 2s infinite; }
+        .vessel-map-label { background: rgba(255, 255, 255, 0.95); border: 1px solid rgba(203, 213, 225, 1); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
 
-    <!-- Navbar Console Control -->
     <header class="border-b border-slate-200 bg-white/90 backdrop-blur-md sticky top-0 z-[1000] px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xs">
         <div>
-            <h1 class="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                <span>🚢</span> Fleet Tanker Command Console
-            </h1>
-            <p class="text-xs text-slate-500 mt-0.5 font-medium">Production Ingestion & Logistics Operations Dashboard</p>
+            <h1 class="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">🚢 Fleet Tanker Command Console</h1>
+            <p class="text-xs text-slate-500 mt-0.5">Drop your daily excel spreadsheet to instantly structure operations.</p>
         </div>
-        <label class="px-5 py-2.5 rounded-xl cursor-pointer bg-blue-600 text-white text-xs font-bold shadow-sm hover:bg-blue-700 transition-all flex items-center gap-2 hover:scale-[1.02]">
-            <span>📂</span> Ingest Production Spreadsheet
-            <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)" />
-        </label>
+        <div class="w-full md:w-auto">
+            <label class="flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-slate-100 px-5 py-2.5 rounded-xl cursor-pointer transition-all text-xs font-semibold text-slate-600 hover:text-slate-900 group">
+                <span class="flex items-center gap-2">📂 <span class="group-hover:text-blue-600 transition-colors">Ingest Production Spreadsheet</span></span>
+                <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)" />
+            </label>
+        </div>
     </header>
 
-    <!-- Main Content Arena -->
     <main class="max-w-7xl mx-auto p-6 space-y-6">
-        
-        <!-- Live Counters Grid -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                <p class="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">In Transit MS</p>
-                <h3 id="msTotal" class="text-2xl font-black text-blue-600 mt-1">0.0 <span class="text-xs font-bold text-slate-400">TMT</span></h3>
-            </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                <p class="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">In Transit HSD</p>
-                <h3 id="hsdTotal" class="text-2xl font-black text-amber-600 mt-1">0.0 <span class="text-xs font-bold text-slate-400">TMT</span></h3>
-            </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                <p class="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Active Fleet Size</p>
-                <h3 id="fleetCount" class="text-2xl font-black text-emerald-600 mt-1">0 <span class="text-xs font-bold text-slate-400">Vessels</span></h3>
-            </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                <p class="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Critical Alerts</p>
-                <h3 id="alertCount" class="text-2xl font-black text-rose-600 mt-1">0 <span class="text-xs font-bold text-slate-400">Active</span></h3>
-            </div>
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">In Transit MS</p><h3 id="msTotal" class="text-2xl font-black text-blue-600">0.0 TMT</h3></div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">In Transit HSD</p><h3 id="hsdTotal" class="text-2xl font-black text-amber-600">0.0 TMT</h3></div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">Active Fleet</p><h3 id="fleetCount" class="text-2xl font-black text-emerald-600">0 Vessels</h3></div>
         </section>
 
-        <!-- Geo-Spatial Fleet Mapping -->
         <section class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-            <div class="flex justify-between items-center mb-3">
-                <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> Live Fleet Positions
-                </h2>
-                <span class="text-[11px] text-slate-400 font-mono">Projection: EPSG:3857</span>
-            </div>
             <div id="map"></div>
         </section>
-        
-        <!-- Live Cards Feed Grid -->
-        <section>
-            <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wide mb-4">Vessel Operational Desks</h2>
-            <div id="vesselContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <!-- Fallback empty state -->
-                <div class="col-span-full bg-slate-100 border-2 border-dashed border-slate-200 rounded-xl p-12 text-center text-slate-400 font-medium">
-                    Please upload an operations excel file above to populate the tracking matrix.
-                </div>
-            </div>
-        </section>
+
+        <section id="vesselContainer" class="space-y-6"></section>
     </main>
 
-    <!-- Detail Inspection Drilldown Modal overlay -->
-    <div id="detailModal" class="hidden fixed inset-0 z-[2000] modal-bg flex items-center justify-center p-4" onclick="closeModal()">
-        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 border border-slate-100" onclick="event.stopPropagation()">
-            <div class="flex justify-between items-start border-b border-slate-100 pb-3">
-                <div>
-                    <h3 id="modalVesselName" class="text-xl font-black text-slate-900">Vessel Name</h3>
-                    <p id="modalVesselStatus" class="text-xs font-bold mt-1 inline-block px-2.5 py-0.5 rounded-full"></p>
-                </div>
-                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
-            </div>
-            
-            <div class="grid grid-cols-2 gap-4 text-xs">
-                <div class="space-y-1 bg-slate-50 p-3 rounded-lg">
-                    <p class="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Loading Profile</p>
-                    <p class="font-medium text-slate-700">Port: <span id="modalLoadPort" class="font-semibold text-slate-900"></span></p>
-                    <p class="font-medium text-slate-700">ETA: <span id="modalLoadEta" class="font-semibold text-slate-900"></span></p>
-                </div>
-                <div class="space-y-1 bg-slate-50 p-3 rounded-lg">
-                    <p class="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Discharge Profile</p>
-                    <p class="font-medium text-slate-700">Port: <span id="modalDisport" class="font-semibold text-slate-900"></span></p>
-                    <p class="font-medium text-slate-700">ETA: <span id="modalDisportEta" class="font-semibold text-slate-900"></span></p>
-                </div>
-            </div>
-
-            <div class="border-t border-slate-100 pt-3 grid grid-cols-2 gap-4">
-                <div>
-                    <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Loading Cargo</p>
-                    <div class="space-y-1 font-mono text-xs">
-                        <div class="flex justify-between bg-blue-50/50 px-2 py-1 rounded"><span class="text-blue-600 font-bold">MS:</span><span id="modalLoadMs" class="font-bold">0</span></div>
-                        <div class="flex justify-between bg-amber-50/50 px-2 py-1 rounded"><span class="text-amber-600 font-bold">HSD:</span><span id="modalLoadHsd" class="font-bold">0</span></div>
-                    </div>
-                </div>
-                <div>
-                    <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Cargo On Board</p>
-                    <div class="space-y-1 font-mono text-xs">
-                        <div class="flex justify-between bg-blue-50/50 px-2 py-1 rounded"><span class="text-blue-600 font-bold">MS:</span><span id="modalBoardMs" class="font-bold">0</span></div>
-                        <div class="flex justify-between bg-amber-50/50 px-2 py-1 rounded"><span class="text-amber-600 font-bold">HSD:</span><span id="modalBoardHsd" class="font-bold">0</span></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs">
-                <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Next Planned Voyage</p>
-                <p id="modalNextVoyage" class="font-semibold text-slate-800 font-mono"></p>
-            </div>
-
-            <div class="bg-rose-50 border border-rose-100 p-3 rounded-xl text-xs">
-                <p class="text-[10px] text-rose-500 font-bold uppercase mb-1">Operational Remarks / Alerts</p>
-                <p id="modalRemarks" class="text-rose-700 font-medium"></p>
-            </div>
-        </div>
-    </div>
-
     <script>
-        let globalFleetData = [];
-        let mapMarkers = [];
+        let currentFleetData = [];
+        let map, markerLayerGroup;
 
-        // Geocoding Coordinates Registry for Ports
-        const portCoordinates = {
-            "SIKKA": [22.4333, 69.8333],
-            "VADINAR": [22.4350, 69.7040],
-            "MUMBAI": [18.9522, 72.8258],
-            "COCHIN": [9.9667, 76.2667],
-            "MANGALORE": [12.9262, 74.8194],
-            "CHENNAI": [13.0827, 80.2707],
-            "VIZAG": [17.6868, 83.2185],
-            "PARADIP": [20.2606, 86.6661],
-            "HALDIA": [22.0257, 88.0583],
-            "KANDLA": [23.0008, 70.2183],
-            "JNPT": [18.9500, 72.9500],
-            "TBD": [18.5000, 79.5000] 
-        };
-
-        // Standardized Map Engine Initialization
-        const map = L.map('map').setView([18.5, 79.5], 5);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '©OpenStreetMap contributors ©CARTO'
-        }).addTo(map);
+        function initDashboardMap() {
+            map = L.map('map').setView([18.5, 79.5], 5);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OpenStreetMap' }).addTo(map);
+            markerLayerGroup = L.layerGroup().addTo(map);
+        }
 
         function handleExcelUpload(event) {
             const file = event.target.files[0];
-            if (!file) return;
-
             const reader = new FileReader();
+
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1 });
+                const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
 
-                // 1. Precise Header Row Extraction
-                const tankerRowIndex = matrix.findIndex(row => row.some(cell => String(cell || "").toUpperCase().includes("TANKER")));
-                if (tankerRowIndex === -1) {
-                    alert("Analysis Failed: Target row designated containing 'Tanker' header sequence could not be found.");
-                    return;
-                }
-
-                // 2. Identify Vessel Columns Mapping
-                const validVesselColumns = [];
-                matrix[tankerRowIndex].forEach((cellValue, colIdx) => {
-                    if (cellValue && colIdx > 0) {
-                        const cleanVal = String(cellValue).trim().toUpperCase();
-                        if (cleanVal !== "STATUS" && cleanVal !== "ACTIVITY" && cleanVal !== "") {
-                            validVesselColumns.push({ name: String(cellValue).trim(), colIndex: colIdx });
-                        }
+                // Locate header row containing 'Tanker' or 'Vessel'
+                const headerRowIdx = matrix.findIndex(r => r.some(c => String(c || "").toUpperCase().includes("TANKER") || String(c || "").toUpperCase().includes("VESSEL")));
+                
+                const vessels = [];
+                matrix[headerRowIdx].forEach((c, idx) => {
+                    if (c && idx > 0 && !String(c).toLowerCase().includes("status")) {
+                        vessels.push({ name: String(c), col: idx, loading: {ms: 0, hsd: 0}, board: {ms: 0, hsd: 0} });
                     }
                 });
 
-                // 3. Setup Target Object Matrix
-                const extractedVessels = validVesselColumns.map(v => ({
-                    vesselName: v.name,
-                    status: "TBD",
-                    activity: "TBD",
-                    loadingPort: "TBD",
-                    loadingEta: "TBD",
-                    disport: "TBD",
-                    disportEta: "TBD",
-                    nextVoyage: "TBD",
-                    remarks: "No alerts",
-                    loadingCargo: { ms: 0, hsd: 0 },
-                    cargoOnBoard: { ms: 0, hsd: 0 }
-                }));
+                let section = "";
+                matrix.forEach(row => {
+                    const label = String(row[0] || "").toUpperCase();
+                    if (label.includes("LOADING DETAILS")) section = "LOADING";
+                    if (label.includes("CARGO ON BOARD")) section = "BOARD";
 
-                // 4. Multi-Pass Context Parsing Strategy (Row-by-Row Label Scanner)
-                let sectionTracking = "";
-
-                matrix.forEach((row, rIdx) => {
-                    const rowLabel = String(row[0] || row[1] || "").trim().toUpperCase();
-                    if (!rowLabel) return;
-
-                    // Section Boundary Trapper
-                    if (rowLabel.includes("LOADING DETAILS")) { sectionTracking = "LOADING"; return; }
-                    if (rowLabel.includes("CARGO ON BOARD")) { sectionTracking = "BOARD"; return; }
-                    if (rowLabel.includes("DISCH") && rowLabel.includes("DETAILS")) { sectionTracking = "DISCHARGE"; return; }
-
-                    // Column Iterator Map
-                    validVesselColumns.forEach((vCol, idx) => {
-                        const rawCellVal = row[vCol.colIndex];
-                        const cellValStr = rawCellVal !== undefined && rawCellVal !== null ? String(rawCellVal).trim() : "";
-
-                        // Base Attribute Parser
-                        if (rowLabel === "STATUS") extractedVessels[idx].status = cellValStr || "TBD";
-                        if (rowLabel === "ACTIVITY") extractedVessels[idx].activity = cellValStr || "TBD";
-                        if (rowLabel.includes("LOADING PORT")) extractedVessels[idx].loadingPort = cellValStr || "TBD";
-                        if (rowLabel.includes("LOADING ETA")) extractedVessels[idx].loadingEta = cellValStr || "TBD";
-                        if (rowLabel.includes("DISPORT") && !rowLabel.includes("ETA")) extractedVessels[idx].disport = cellValStr || "TBD";
-                        if (rowLabel.includes("DISPORT ETA")) extractedVessels[idx].disportEta = cellValStr || "TBD";
-                        if (rowLabel.includes("NEXT VOYAGE")) extractedVessels[idx].nextVoyage = cellValStr || "TBD";
-                        if (rowLabel.includes("REMARKS")) extractedVessels[idx].remarks = cellValStr || "No alerts";
-
-                        // Specialized Section Metric Splitter
-                        if (sectionTracking === "LOADING") {
-                            let value = parseFloat(cellValStr) || 0;
-                            if (rowLabel === "MS") extractedVessels[idx].loadingCargo.ms = value;
-                            if (rowLabel === "HSD") extractedVessels[idx].loadingCargo.hsd = value;
-                        }
-                        if (sectionTracking === "BOARD") {
-                            let value = parseFloat(cellValStr) || 0;
-                            if (rowLabel === "MS") extractedVessels[idx].cargoOnBoard.ms = value;
-                            if (rowLabel === "HSD") extractedVessels[idx].cargoOnBoard.hsd = value;
-                        }
-                    });
+                    if (section) {
+                        vessels.forEach(v => {
+                            let val = parseFloat(row[v.col]) || 0;
+                            if (label.includes("MS")) section === "LOADING" ? v.loading.ms = val : v.board.ms = val;
+                            if (label.includes("HSD")) section === "LOADING" ? v.loading.hsd = val : v.board.hsd = val;
+                        });
+                    }
                 });
 
-                globalFleetData = extractedVessels;
-                updateConsoleDOM();
+                currentFleetData = vessels;
+                renderDashboard();
             };
             reader.readAsArrayBuffer(file);
         }
 
-        // Color Code Helper Class Logic
-        function getPulseClass(status) {
-            const normalized = String(status).toUpperCase();
-            if (normalized.includes("SAILING") || normalized.includes("TRANSIT")) return "indicator-sailing";
-            if (normalized.includes("DISCH")) return "indicator-discharging";
-            if (normalized.includes("LOAD")) return "indicator-loading";
-            return "indicator-berthed";
-        }
-
-        function getBadgeStyles(status) {
-            const normalized = String(status).toUpperCase();
-            if (normalized.includes("SAILING") || normalized.includes("TRANSIT")) return "bg-emerald-100 text-emerald-800 border-emerald-200";
-            if (normalized.includes("DISCH")) return "bg-blue-100 text-blue-800 border-blue-200";
-            if (normalized.includes("LOAD")) return "bg-amber-100 text-amber-800 border-amber-200";
-            return "bg-rose-100 text-rose-800 border-rose-200";
-        }
-
-        function updateConsoleDOM() {
+        function renderDashboard() {
             const container = document.getElementById('vesselContainer');
-            
-            // Wipe clean old map pins
-            mapMarkers.forEach(m => map.removeLayer(m));
-            mapMarkers = [];
-
-            if (globalFleetData.length === 0) return;
-
-            let totalInTransitMS = 0;
-            let totalInTransitHSD = 0;
-            let alertCounter = 0;
-
-            // Render Process
-            container.innerHTML = globalFleetData.map((v, index) => {
-                totalInTransitMS += v.cargoOnBoard.ms;
-                totalInTransitHSD += v.cargoOnBoard.hsd;
-                if (v.remarks && v.remarks.toLowerCase() !== "no alerts" && v.remarks.toLowerCase() !== "nil" && v.remarks.toLowerCase() !== "tbd") {
-                    alertCounter++;
-                }
-
-                const animationPulseClass = getPulseClass(v.status);
-                const statusBadgeStyle = getBadgeStyles(v.status);
-
-                // Map Plotter Engine Link
-                let lookupPort = String(v.disport !== "TBD" ? v.disport : v.loadingPort).toUpperCase().split("/")[0].trim();
-                let coords = portCoordinates[lookupPort] || [18.5 + (Math.random() - 0.5) * 4, 79.5 + (Math.random() - 0.5) * 4];
-
-                const customMarkerIcon = L.divIcon({
-                    className: 'custom-vessel-marker',
-                    html: `<div class="w-4 h-4 rounded-full border-2 border-white shadow-md ${animationPulseClass}"></div>`,
-                    iconSize: [16, 16],
-                    iconAnchor: [8, 8]
-                });
-
-                const leafMarker = L.marker(coords, { icon: customMarkerIcon }).addTo(map);
-                leafMarker.bindTooltip(`<div class="vessel-map-label">${v.vesselName} [${v.status}]</div>`, { permanent: true, direction: 'top', offset: [0, -5] });
-                leafMarker.on('click', () => triggerDrilldownModal(index));
-                mapMarkers.push(leafMarker);
-
-                return `
-                    <div class="vessel-card bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between" onclick="triggerDrilldownModal(${index})">
-                        <div>
-                            <div class="flex justify-between items-start gap-2">
-                                <h3 class="font-black text-slate-900 text-base tracking-tight">${v.vesselName}</h3>
-                                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold border ${statusBadgeStyle} whitespace-nowrap">${v.status}</span>
-                            </div>
-                            <p class="text-xs text-slate-500 font-mono mt-1">Activity: <span class="text-slate-700 font-semibold">${v.activity}</span></p>
-                            
-                            <div class="grid grid-cols-2 gap-3 my-4">
-                                <div class="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100/50">
-                                    <p class="text-[9px] text-blue-600 font-bold uppercase tracking-wider">Cargo On Board</p>
-                                    <p class="text-xs font-black text-slate-800 font-mono mt-0.5">MS: ${v.cargoOnBoard.ms} TMT</p>
-                                    <p class="text-xs font-black text-slate-800 font-mono">HSD: ${v.cargoOnBoard.hsd} TMT</p>
+            container.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    ${currentFleetData.map(v => `
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-lg mb-3 border-b border-slate-100 pb-2">${v.name}</h3>
+                            <div class="grid grid-cols-2 gap-4 text-xs">
+                                <div>
+                                    <p class="text-slate-400 font-bold mb-1 uppercase">Loading</p>
+                                    <p class="text-blue-600 font-mono">MS: ${v.loading.ms} TMT</p>
+                                    <p class="text-amber-600 font-mono">HSD: ${v.loading.hsd} TMT</p>
                                 </div>
-                                <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                                    <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Next Voyage</p>
-                                    <p class="text-xs font-bold text-slate-700 truncate mt-1" title="${v.nextVoyage}">${v.nextVoyage}</p>
+                                <div>
+                                    <p class="text-slate-400 font-bold mb-1 uppercase">On Board</p>
+                                    <p class="text-blue-600 font-mono">MS: ${v.board.ms} TMT</p>
+                                    <p class="text-amber-600 font-mono">HSD: ${v.board.hsd} TMT</p>
                                 </div>
                             </div>
                         </div>
-
-                        <div class="border-t border-slate-100 pt-3 flex items-center justify-between text-[11px]">
-                            <span class="text-slate-400">Destination: <strong class="text-slate-700 font-bold">${v.disport}</strong></span>
-                            <span class="text-slate-400 font-mono">${v.disportEta}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            // Pan view to fit active fleet if available
-            if(mapMarkers.length > 0) {
-                const markerGroup = new L.featureGroup(mapMarkers);
-                map.fitBounds(markerGroup.getBounds().pad(0.15));
-            }
-
-            // High precision KPI Updates
-            document.getElementById('msTotal').innerHTML = `${totalInTransitMS.toFixed(1)} <span class="text-xs font-bold text-slate-400">TMT</span>`;
-            document.getElementById('hsdTotal').innerHTML = `${totalInTransitHSD.toFixed(1)} <span class="text-xs font-bold text-slate-400">TMT</span>`;
-            document.getElementById('fleetCount').innerHTML = `${globalFleetData.length} <span class="text-xs font-bold text-slate-400">Vessels</span>`;
-            document.getElementById('alertCount').innerHTML = `${alertCounter} <span class="text-xs font-bold text-slate-400">Active</span>`;
+                    `).join('')}
+                </div>
+            `;
+            document.getElementById('fleetCount').innerText = `${currentFleetData.length} Vessels`;
         }
 
-        function triggerDrilldownModal(index) {
-            const v = globalFleetData[index];
-            if (!v) return;
-
-            document.getElementById('modalVesselName').innerText = v.vesselName;
-            document.getElementById('modalVesselStatus').innerText = v.status;
-            
-            // Clean badge allocation for context window
-            const badgeElement = document.getElementById('modalVesselStatus');
-            badgeElement.className = `text-xs font-bold mt-1 inline-block px-2.5 py-0.5 rounded-full border ${getBadgeStyles(v.status)}`;
-
-            document.getElementById('modalLoadPort').innerText = v.loadingPort;
-            document.getElementById('modalLoadEta').innerText = v.loadingEta;
-            document.getElementById('modalDisport').innerText = v.disport;
-            document.getElementById('modalDisportEta').innerText = v.disportEta;
-            
-            document.getElementById('modalLoadMs').innerText = `${v.loadingCargo.ms} TMT`;
-            document.getElementById('modalLoadHsd').innerText = `${v.loadingCargo.hsd} TMT`;
-            document.getElementById('modalBoardMs').innerText = `${v.cargoOnBoard.ms} TMT`;
-            document.getElementById('modalBoardHsd').innerText = `${v.cargoOnBoard.hsd} TMT`;
-            
-            document.getElementById('modalNextVoyage').innerText = v.nextVoyage;
-            document.getElementById('modalRemarks').innerText = v.remarks;
-
-            document.getElementById('detailModal').classList.remove('hidden');
-        }
-
-        function closeModal() {
-            document.getElementById('detailModal').classList.add('hidden');
-        }
+        window.onload = initDashboardMap;
     </script>
 </body>
 </html>
