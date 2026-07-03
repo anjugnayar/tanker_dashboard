@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fleet Tanker Command Console</title>
     <!-- Dependencies -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        #map { height: 400px; border-radius: 12px; z-index: 1; }
+        #map { height: 400px; width: 100%; border-radius: 12px; z-index: 10; }
         .vessel-card { transition: all 0.2s; }
         .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
     </style>
@@ -21,19 +21,28 @@
     <header class="bg-white border-b border-slate-200 p-6 flex justify-between items-center sticky top-0 z-50">
         <div>
             <h1 class="text-xl font-black">🚢 Fleet Tanker Command Console</h1>
-            <p class="text-xs text-slate-500 font-mono">Master Template Active</p>
+            <p class="text-xs text-slate-500 font-mono">Master Template System Active</p>
         </div>
         <input type="file" id="excelFile" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" onchange="handleExcelUpload(event)" />
     </header>
 
     <main class="max-w-7xl mx-auto p-6 space-y-6">
-        <section id="map" class="bg-slate-200 border border-slate-300"></section>
+        <!-- Map Section -->
+        <section id="map-container" class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <h2 class="text-sm font-bold mb-3">Live Fleet Map</h2>
+            <div id="map"></div>
+        </section>
+
+        <!-- Dashboard Section -->
         <section id="vesselContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></section>
     </main>
 
     <script>
-        let map = L.map('map').setView([18.5, 79.5], 5);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OpenStreetMap' }).addTo(map);
+        // Initialize Map
+        const map = L.map('map').setView([18.5, 79.5], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '©OpenStreetMap'
+        }).addTo(map);
 
         function handleExcelUpload(event) {
             const file = event.target.files[0];
@@ -44,28 +53,26 @@
                 const workbook = XLSX.read(data, { type: 'array' });
                 const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
 
-                // 1. Find Vessel Row (the row containing "Tanker")
+                // 1. Locate Anchor: Tanker Header Row
                 const tankerRowIndex = matrix.findIndex(row => row.some(cell => String(cell).toUpperCase().includes("TANKER")));
                 if (tankerRowIndex === -1) { alert("Could not find 'Tanker' header row."); return; }
 
-                // 2. Map Columns to Vessels
+                // 2. Map Vessels
                 const vessels = [];
                 matrix[tankerRowIndex].forEach((cell, colIndex) => {
-                    if (cell && colIndex > 0) { // Assuming first column is label
+                    if (cell && colIndex > 0) { 
                         vessels.push({ name: String(cell), col: colIndex, load: {}, board: {} });
                     }
                 });
 
-                // 3. Scan Matrix for Sections and Data
+                // 3. Scan Matrix for Data Sections
                 let currentSection = "";
                 matrix.forEach(row => {
                     const rowLabel = String(row[0] || row[1] || "").toUpperCase();
 
-                    // Update Context
                     if (rowLabel.includes("LOADING DETAILS")) currentSection = "LOADING";
                     if (rowLabel.includes("CARGO ON BOARD")) currentSection = "BOARD";
 
-                    // Extract Data
                     if (currentSection === "LOADING" || currentSection === "BOARD") {
                         vessels.forEach(v => {
                             let val = parseFloat(row[v.col]) || 0;
@@ -87,18 +94,18 @@
         function renderDashboard(vessels) {
             const container = document.getElementById('vesselContainer');
             container.innerHTML = vessels.map(v => `
-                <div class="vessel-card bg-white p-5 rounded-xl border border-slate-200">
-                    <h3 class="font-bold text-lg mb-3 border-b pb-2">${v.name}</h3>
+                <div class="vessel-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="font-bold text-lg mb-3 border-b border-slate-100 pb-2">${v.name}</h3>
                     <div class="grid grid-cols-2 gap-4 text-xs">
                         <div>
-                            <p class="text-slate-400 font-bold mb-1">LOADING</p>
-                            <p class="text-blue-600">MS: ${v.load.ms || 0} TMT</p>
-                            <p class="text-amber-600">HSD: ${v.load.hsd || 0} TMT</p>
+                            <p class="text-slate-400 font-bold mb-1 uppercase">Loading</p>
+                            <p class="text-blue-600 font-mono">MS: ${v.load.ms || 0} TMT</p>
+                            <p class="text-amber-600 font-mono">HSD: ${v.load.hsd || 0} TMT</p>
                         </div>
                         <div>
-                            <p class="text-slate-400 font-bold mb-1">ON BOARD</p>
-                            <p class="text-blue-600">MS: ${v.board.ms || 0} TMT</p>
-                            <p class="text-amber-600">HSD: ${v.board.hsd || 0} TMT</p>
+                            <p class="text-slate-400 font-bold mb-1 uppercase">On Board</p>
+                            <p class="text-blue-600 font-mono">MS: ${v.board.ms || 0} TMT</p>
+                            <p class="text-amber-600 font-mono">HSD: ${v.board.hsd || 0} TMT</p>
                         </div>
                     </div>
                 </div>
