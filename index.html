@@ -4,22 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Fleet Tanker Command Console</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <link class="main-map" rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet Engine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         #map { height: 520px; border-radius: 12px; z-index: 1; }
         .vessel-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
         .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
-        .indicator-sailing { animation: radar-pulse-green 2s infinite; }
-        .indicator-discharging { animation: radar-pulse-blue 2s infinite; }
-        .indicator-loading { animation: radar-pulse-amber 2s infinite; }
-        .indicator-berthed { animation: radar-pulse-red 2s infinite; }
         @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
         @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
         @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
         @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .indicator-sailing { animation: radar-pulse-green 2s infinite; }
+        .indicator-discharging { animation: radar-pulse-blue 2s infinite; }
+        .indicator-loading { animation: radar-pulse-amber 2s infinite; }
+        .indicator-berthed { animation: radar-pulse-red 2s infinite; }
         .vessel-map-label { background: rgba(255, 255, 255, 0.95); border: 1px solid rgba(203, 213, 225, 1); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
     </style>
 </head>
@@ -30,17 +33,29 @@
             <h1 class="text-xl font-black text-slate-900">🚢 Fleet Tanker Command Console</h1>
             <p class="text-xs text-slate-500 mt-0.5">Production Spreadsheet Ingestion Engine Active</p>
         </div>
-        <input type="file" id="excelFile" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" onchange="handleExcelUpload(event)" />
+        <label class="px-5 py-2.5 rounded-xl cursor-pointer bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors">
+            📂 Ingest Production Spreadsheet
+            <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)" />
+        </label>
     </header>
 
     <main class="max-w-7xl mx-auto p-6 space-y-6">
-        <section class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Metrics (These will update dynamically via JS) -->
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">In Transit MS</p><h3 id="msTotal" class="text-xl font-black text-blue-600">0.0 TMT</h3></div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">In Transit HSD</p><h3 id="hsdTotal" class="text-xl font-black text-amber-600">0.0 TMT</h3></div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs"><p class="text-[10px] text-slate-400 font-bold uppercase">Active Fleet</p><h3 id="fleetCount" class="text-xl font-black text-emerald-600">0 Vessels</h3></div>
+        </section>
+
+        <section class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
             <div id="map"></div>
         </section>
+        
         <section id="vesselContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></section>
     </main>
 
     <script>
+        let currentFleetData = [];
         const map = L.map('map').setView([18.5, 79.5], 5);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OpenStreetMap' }).addTo(map);
 
@@ -53,19 +68,42 @@
                 const workbook = XLSX.read(data, { type: 'array' });
                 const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
 
-                // 1. Locate Tanker Row
+                // 1. Locate the 'Tanker' / Header row
                 const tankerRowIndex = matrix.findIndex(row => row.some(cell => String(cell || "").toUpperCase().includes("TANKER")));
-                if (tankerRowIndex === -1) { alert("Could not find 'Tanker' row in Excel!"); return; }
+                if (tankerRowIndex === -1) { alert("Could not find 'Tanker' row!"); return; }
 
-                // 2. Identify Vessels
-                const vessels = [];
+                // 2. Identify Vessels by columns
+                const vesselsMap = []; 
                 matrix[tankerRowIndex].forEach((cell, colIndex) => {
-                    if (cell && colIndex > 0) {
-                        vessels.push({ name: String(cell), col: colIndex, load: { ms: 0, hsd: 0 }, board: { ms: 0, hsd: 0 } });
+                    if (cell && colIndex > 0 && String(cell).toLowerCase() !== "status" && String(cell).toLowerCase() !== "activity") {
+                        vesselsMap.push({ name: String(cell), col: colIndex });
                     }
                 });
 
-                // 3. Parse Sections
+                // 3. Scan for data rows (Status, Activity, etc.)
+                const extracted = vesselsMap.map(v => ({
+                    vessel: v.name,
+                    status: "TBD", activity: "TBD", loading_port: "TBD", loading_eta: "TBD",
+                    ms_cargo: 0, hsd_cargo: 0, disport: "TBD", disport_eta: "TBD", remarks: "No alerts", next_voyage: "TBD"
+                }));
+
+                matrix.forEach(row => {
+                    const rowLabel = String(row[0] || row[1] || "").toUpperCase();
+                    
+                    // Map general info
+                    vesselsMap.forEach((v, idx) => {
+                        if (rowLabel.includes("STATUS")) extracted[idx].status = row[v.col] || "TBD";
+                        if (rowLabel.includes("ACTIVITY")) extracted[idx].activity = row[v.col] || "TBD";
+                        if (rowLabel.includes("LOADING PORT")) extracted[idx].loading_port = row[v.col] || "TBD";
+                        if (rowLabel.includes("LOADING ETA")) extracted[idx].loading_eta = row[v.col] || "TBD";
+                        if (rowLabel.includes("DISPORT") && !rowLabel.includes("ETA")) extracted[idx].disport = row[v.col] || "TBD";
+                        if (rowLabel.includes("DISPORT ETA")) extracted[idx].disport_eta = row[v.col] || "TBD";
+                        if (rowLabel.includes("REMARKS")) extracted[idx].remarks = row[v.col] || "No alerts";
+                        if (rowLabel.includes("NEXT VOYAGE")) extracted[idx].next_voyage = row[v.col] || "TBD";
+                    });
+                });
+
+                // 4. Robust Section Parser for Cargo (as requested)
                 let currentSection = "";
                 matrix.forEach(row => {
                     const rowLabel = String(row[0] || row[1] || "").toUpperCase();
@@ -73,38 +111,43 @@
                     if (rowLabel.includes("CARGO ON BOARD")) currentSection = "BOARD";
 
                     if (currentSection === "LOADING" || currentSection === "BOARD") {
-                        vessels.forEach(v => {
+                        vesselsMap.forEach((v, idx) => {
                             let val = parseFloat(row[v.col]) || 0;
-                            if (rowLabel.includes("MS")) currentSection === "LOADING" ? v.load.ms = val : v.board.ms = val;
-                            if (rowLabel.includes("HSD")) currentSection === "LOADING" ? v.load.hsd = val : v.board.hsd = val;
+                            if (rowLabel.includes("MS")) extracted[idx].ms_cargo = val;
+                            if (rowLabel.includes("HSD")) extracted[idx].hsd_cargo = val;
                         });
                     }
                 });
 
-                renderDashboard(vessels);
+                currentFleetData = extracted;
+                renderDashboard();
             };
             reader.readAsArrayBuffer(file);
         }
 
-        function renderDashboard(vessels) {
+        function renderDashboard() {
             const container = document.getElementById('vesselContainer');
-            container.innerHTML = vessels.map(v => `
-                <div class="vessel-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 class="font-bold text-lg mb-3 border-b border-slate-100 pb-2">${v.name}</h3>
-                    <div class="grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                            <p class="text-slate-400 font-bold mb-1 uppercase">Loading</p>
-                            <p class="text-blue-600 font-mono">MS: ${v.load.ms} TMT</p>
-                            <p class="text-amber-600 font-mono">HSD: ${v.load.hsd} TMT</p>
-                        </div>
-                        <div>
-                            <p class="text-slate-400 font-bold mb-1 uppercase">On Board</p>
-                            <p class="text-blue-600 font-mono">MS: ${v.board.ms} TMT</p>
-                            <p class="text-amber-600 font-mono">HSD: ${v.board.hsd} TMT</p>
+            container.innerHTML = currentFleetData.map(v => `
+                <div class="vessel-card bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                    <h3 class="font-bold text-lg mb-2">${v.vessel}</h3>
+                    <div class="space-y-2 text-xs">
+                        <p class="text-slate-500">Status: <span class="font-semibold text-slate-800">${v.status}</span></p>
+                        <div class="grid grid-cols-2 gap-2 mt-3">
+                            <div class="bg-blue-50 p-2 rounded">
+                                <p class="text-blue-600 font-bold">MS</p>
+                                <p>${v.ms_cargo} TMT</p>
+                            </div>
+                            <div class="bg-amber-50 p-2 rounded">
+                                <p class="text-amber-600 font-bold">HSD</p>
+                                <p>${v.hsd_cargo} TMT</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             `).join('');
+            
+            // Update simple metrics
+            document.getElementById('fleetCount').innerText = `${currentFleetData.length} Vessels`;
         }
     </script>
 </body>
