@@ -284,6 +284,7 @@
         // so a vessel spanning 2 merged columns -- or split into 2 differing sub-columns
         // for two parcels -- is treated as ONE vessel with multiple source columns.
         function buildVesselGroups(nameRow, startCol) {
+            if (!nameRow) return [];
             const groups = [];
             let i = startCol;
             while (i < nameRow.length) {
@@ -342,20 +343,23 @@
         // anywhere between (rows can be inserted/removed like any other row heading).
         // The actual MS/HSD figures can land in any column of that row, or spill onto
         // the row right after it, so once a label row is found, read full-row text there
-        // and one row below it.
+        // and one row below it. This cell can also be a FORMULA rather than a typed
+        // value -- Excel always saves a formula's last-calculated result alongside it
+        // (SheetJS exposes that cached result as the cell's normal value), so this
+        // already works for formulas in the common case with no special handling needed.
         function extractInTransitTotals(nativeMatrix, filledMatrix) {
-            let ms = 0, hsd = 0;
+            let ms = 0, hsd = 0, msFound = false, hsdFound = false;
             for (let r = 0; r < filledMatrix.length; r++) {
                 if (!isInTransitLabelRow(filledMatrix[r])) continue;
                 for (let look = r; look <= r + 1 && look < nativeMatrix.length; look++) {
                     const rowText = rowToText(nativeMatrix[look]);
                     const msMatch = rowText.match(/([\d]+(?:\.\d+)?)\s*MS\b/i);
                     const hsdMatch = rowText.match(/([\d]+(?:\.\d+)?)\s*HSD\b/i);
-                    if (msMatch) ms = parseFloat(msMatch[1]);
-                    if (hsdMatch) hsd = parseFloat(hsdMatch[1]);
+                    if (msMatch) { ms = parseFloat(msMatch[1]); msFound = true; }
+                    if (hsdMatch) { hsd = parseFloat(hsdMatch[1]); hsdFound = true; }
                 }
             }
-            return { ms, hsd };
+            return { ms, hsd, msFound, hsdFound };
         }
 
         // Rows identified as the In-Transit summary are excluded from the main per-vessel
@@ -395,7 +399,7 @@
             const headerEndRow = getHeaderBlockEndRow(sheet, headerRowIdx, LABEL_COLS);
 
             // 4) Fleet-wide "In Transit" summary -- scanned across the whole sheet.
-            const totals = extractInTransitTotals(nativeMatrix, filledMatrix);
+            const rawTotals = extractInTransitTotals(nativeMatrix, filledMatrix);
             const inTransitRows = buildInTransitRowSkipSet(filledMatrix);
 
             // 5) Vessel column groups from the (merge-filled) header row.
@@ -454,11 +458,15 @@
 
             // 6) Per-column ("per-leg") breakdowns for Loading & Disport: pairs each port
             //    with ITS OWN ms/hsd instead of only the combined/summed scalars above.
-            function buildLegs(portKey, etaKey, msKey, hsdKey) {
+            function buildLegs(portKey, etaKey, msKey, hsdKey, norKey, allFastKey, etcKey, sailedKey) {
                 const portRow = rowIndexByAttrKey[portKey];
                 const etaRow = rowIndexByAttrKey[etaKey];
                 const msRow = rowIndexByAttrKey[msKey];
                 const hsdRow = rowIndexByAttrKey[hsdKey];
+                const norRow = rowIndexByAttrKey[norKey];
+                const allFastRow = rowIndexByAttrKey[allFastKey];
+                const etcRow = rowIndexByAttrKey[etcKey];
+                const sailedRow = rowIndexByAttrKey[sailedKey];
                 const legsByVessel = {};
                 if (portRow === undefined && msRow === undefined && hsdRow === undefined) {
                     vesselGroups.forEach(({ name }) => { legsByVessel[name] = []; });
@@ -471,27 +479,51 @@
                 };
                 vesselGroups.forEach(({ name, cols }) => {
                     const legs = cols.map(c => {
+                        const get = (row) => (row !== undefined) ? cleanText(nativeMatrix[row][c]) : '';
                         const portV = (portRow !== undefined) ? nativeMatrix[portRow][c] : '';
                         const etaV = (etaRow !== undefined) ? nativeMatrix[etaRow][c] : '';
                         const msV = (msRow !== undefined) ? nativeMatrix[msRow][c] : '';
                         const hsdV = (hsdRow !== undefined) ? nativeMatrix[hsdRow][c] : '';
                         const ms = (typeof msV === 'number') ? msV : (parseFloat(msV) || 0);
                         const hsd = (typeof hsdV === 'number') ? hsdV : (parseFloat(hsdV) || 0);
-                        return { port: cleanText(portV), eta: cleanText(etaV), ms, hsd };
+                        return {
+                            port: cleanText(portV), eta: cleanText(etaV), ms, hsd,
+                            nor: get(norRow), allFast: get(allFastRow), etc: get(etcRow), sailed: get(sailedRow)
+                        };
                     }).filter(leg => leg.port !== '' || leg.ms > 0 || leg.hsd > 0);
                     legsByVessel[name] = legs;
                 });
                 return legsByVessel;
             }
 
-            const disportLegsByVessel = buildLegs('disport', 'disport_eta', 'disport_ms', 'disport_hsd');
-            const loadingLegsByVessel = buildLegs('loading_port', 'loading_eta', 'loading_ms', 'loading_hsd');
+            const disportLegsByVessel = buildLegs('disport', 'disport_eta', 'disport_ms', 'disport_hsd', 'disport_nor', 'disport_all_fast', 'disport_etc', 'disport_sailed');
+            const loadingLegsByVessel = buildLegs('loading_port', 'loading_eta', 'loading_ms', 'loading_hsd', 'loading_nor', 'loading_all_fast', 'loading_etc', 'loading_sailed');
             vesselGroups.forEach(({ name }) => {
                 fleetData[name].disport_legs = disportLegsByVessel[name] || [];
                 fleetData[name].loading_legs = loadingLegsByVessel[name] || [];
             });
 
-            return { vessels: Object.values(fleetData), totals };
+            const vessels = Object.values(fleetData);
+
+            // If the sheet's own In-Transit MS/HSD couldn't be read (most commonly: a
+            // formula whose result was never calculated/cached before the file was saved,
+            // so there is no value to read at all -- not something a spreadsheet reader can
+            // fix without re-running the formula), fall back to summing Cargo On Board across
+            // currently-Sailing vessels, and say plainly that it's an estimate rather than
+            // silently showing 0 or passing off a derived number as the sheet's own figure.
+            let totals = { ms: rawTotals.ms, hsd: rawTotals.hsd, estimated: false };
+            if (!rawTotals.msFound || !rawTotals.hsdFound) {
+                const sailing = vessels.filter(v => normalizeActivity(v.activity) === 'Sailing');
+                const estMs = sailing.reduce((sum, v) => sum + (parseFloat(v.ms_cargo) || 0), 0);
+                const estHsd = sailing.reduce((sum, v) => sum + (parseFloat(v.hsd_cargo) || 0), 0);
+                totals = {
+                    ms: rawTotals.msFound ? rawTotals.ms : estMs,
+                    hsd: rawTotals.hsdFound ? rawTotals.hsd : estHsd,
+                    estimated: !rawTotals.msFound || !rawTotals.hsdFound
+                };
+            }
+
+            return { vessels, totals };
         }
 
         // =====================================================================
@@ -551,6 +583,14 @@
                 if (coordsEqual(getCoords(leg.port), destCoord)) return leg;
             }
             return null;
+        }
+
+        // Current Status text can lag behind reality (nobody updated it yet). If NOR, All
+        // Fast, ETC, or Sailed is filled in for a leg, the vessel has already reached that
+        // port regardless of what Current Status still says -- an ETC in particular can only
+        // exist once loading is actually underway, which requires having already arrived.
+        function legReached(leg) {
+            return !!(leg && (leg.nor || leg.allFast || leg.etc || leg.sailed));
         }
 
         // A straight line between two ports on OPPOSITE coasts of the Indian peninsula
@@ -621,23 +661,55 @@
 
         function estimateVesselPosition(v) {
             const act = normalizeActivity(v.activity);
-            const destCoord = getCoords(v.status) || getCoords(v.disport) || getCoords(v.loading_port);
+            let destCoord = getCoords(v.status) || getCoords(v.disport) || getCoords(v.loading_port);
             if (act !== 'Sailing' || !destCoord) {
                 return destCoord ? { coord: destCoord, route: null } : null;
             }
 
-            const disportLeg = findMatchingLeg(v.disport_legs, destCoord);
-            const loadingLeg = !disportLeg ? findMatchingLeg(v.loading_legs, destCoord) : null;
+            let disportLeg = findMatchingLeg(v.disport_legs, destCoord);
+            let loadingLeg = !disportLeg ? findMatchingLeg(v.loading_legs, destCoord) : null;
+
+            if (disportLeg && legReached(disportLeg)) {
+                // Arrived at (or already left) this disport. There's no "next voyage" loading
+                // leg in this data to redirect to, so show it at its last confirmed position
+                // rather than mis-framing it as still approaching.
+                return { coord: destCoord, route: null };
+            }
+
+            if (loadingLeg && legReached(loadingLeg)) {
+                if (loadingLeg.sailed && v.disport_legs && v.disport_legs.length) {
+                    // Already departed this loading port: it's heading toward its disport now,
+                    // whatever Current Status still says.
+                    disportLeg = v.disport_legs[0];
+                    destCoord = getCoords(disportLeg.port) || destCoord;
+                    loadingLeg = null;
+                } else {
+                    // Arrived and loading (NOR/All Fast/ETC present) but not yet sailed, or
+                    // sailed with no disport data to route to: it's genuinely AT this port right
+                    // now -- show it plainly there, same as any other at-port vessel.
+                    return { coord: destCoord, route: null };
+                }
+            }
 
             let originCoord = null, originName = null, departDate = null, etaDate = null, destName = null;
 
             if (disportLeg) {
-                // Heading to discharge: came from its loading port.
-                originCoord = getCoords(v.loading_port);
-                originName = v.loading_port;
-                departDate = parseFlexibleDate(v.loading_sailed);
-                etaDate = parseFlexibleDate(disportLeg.eta);
-                destName = disportLeg.port;
+                // Current Status can flip to naming the disport ("To Kandla") as soon as
+                // loading wraps up, even though the vessel is still sitting at the loading
+                // port waiting to sail. Only trust "heading to disport" once there's a
+                // confirmed Sailed date -- otherwise it's still at the loading port.
+                const confirmedDeparture = parseFlexibleDate(v.loading_sailed);
+                if (!confirmedDeparture) {
+                    const loadingCoord = getCoords(v.loading_port);
+                    if (loadingCoord) return { coord: loadingCoord, route: null };
+                    destName = disportLeg.port; // no loading-port coordinate either; fall through to the generic fallback below
+                } else {
+                    originCoord = getCoords(v.loading_port);
+                    originName = v.loading_port;
+                    departDate = confirmedDeparture;
+                    etaDate = parseFlexibleDate(disportLeg.eta);
+                    destName = disportLeg.port;
+                }
             } else if (loadingLeg) {
                 // Ballast leg heading to load: came from wherever the remarks say it sailed from.
                 const originInfo = extractOriginFromRemarks(v.remarks);
@@ -835,8 +907,16 @@
 
                     currentFleetData = vessels;
 
-                    document.getElementById('msTotal').innerText = `${totals.ms.toFixed(1)} TMT`;
-                    document.getElementById('hsdTotal').innerText = `${totals.hsd.toFixed(1)} TMT`;
+                    const estSuffix = totals.estimated ? ' (est.)' : '';
+                    const estTitle = totals.estimated
+                        ? 'The sheet\u2019s own In Transit figure could not be read (e.g. a formula with no calculated value saved). Estimated instead from Cargo On Board across currently-Sailing vessels.'
+                        : '';
+                    const msEl = document.getElementById('msTotal');
+                    const hsdEl = document.getElementById('hsdTotal');
+                    msEl.innerText = `${totals.ms.toFixed(1)} TMT${estSuffix}`;
+                    hsdEl.innerText = `${totals.hsd.toFixed(1)} TMT${estSuffix}`;
+                    msEl.title = estTitle;
+                    hsdEl.title = estTitle;
 
                     const now = new Date();
                     document.getElementById('liveTimestampBadge').innerText = `Last Updated: ${now.toLocaleTimeString()}`;
